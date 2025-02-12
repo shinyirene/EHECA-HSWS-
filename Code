@@ -1,0 +1,78 @@
+import numpy as np
+import pandas as pd
+import xgboost as xgb
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras.layers import Conv2D, Flatten, Dense, LSTM, Input
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import torch
+from transformers import SwinForImageClassification, SwinConfig
+
+# Load Dataset (Simulated Placeholder)
+df = pd.read_csv('menstrual_health_data.csv')
+X = df.drop(columns=['Menstrual_Status'])
+y = df['Menstrual_Status']
+
+# Data Preprocessing
+scaler = MinMaxScaler()
+X_scaled = scaler.fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# XGBoost Model for User Segmentation
+xgb_model = xgb.XGBClassifier(objective='binary:logistic', eval_metric='logloss', max_depth=5, eta=0.1)
+xgb_model.fit(X_train, y_train)
+y_pred_xgb = xgb_model.predict(X_test)
+
+# Swin Transformer for Issue Extraction
+swin_config = SwinConfig(image_size=224)
+swin_model = SwinForImageClassification(swin_config)
+
+def swin_inference(image_tensor):
+    with torch.no_grad():
+        output = swin_model(image_tensor)
+    return output.logits.argmax(dim=-1).item()
+
+# Hybrid CNN Model for Menstrual Pattern Tracking
+cnn_model = keras.Sequential([
+    Input(shape=(28, 28, 1)),
+    Conv2D(32, kernel_size=(3, 3), activation='relu'),
+    Conv2D(64, kernel_size=(3, 3), activation='relu'),
+    Flatten(),
+    Dense(128, activation='relu'),
+    Dense(1, activation='sigmoid')
+])
+
+cnn_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+cnn_model.fit(X_train.reshape(-1, 28, 28, 1), y_train, epochs=10, batch_size=32)
+
+# Autoencoder for Anomaly Detection
+autoencoder = keras.Sequential([
+    Input(shape=(X_train.shape[1],)),
+    Dense(64, activation='relu'),
+    Dense(32, activation='relu'),
+    Dense(64, activation='relu'),
+    Dense(X_train.shape[1], activation='sigmoid')
+])
+
+autoencoder.compile(optimizer='adam', loss='mse')
+autoencoder.fit(X_train, X_train, epochs=10, batch_size=32)
+
+# Anomaly Scores
+reconstructed = autoencoder.predict(X_test)
+anomaly_scores = np.mean(np.abs(X_test - reconstructed), axis=1)
+threshold = np.percentile(anomaly_scores, 95)
+anomaly_labels = (anomaly_scores > threshold).astype(int)
+
+# Evaluation
+accuracy = accuracy_score(y_test, y_pred_xgb)
+precision = precision_score(y_test, y_pred_xgb)
+recall = recall_score(y_test, y_pred_xgb)
+f1 = f1_score(y_test, y_pred_xgb)
+
+# Display Results
+print(f'Accuracy: {accuracy:.4f}')
+print(f'Precision: {precision:.4f}')
+print(f'Recall: {recall:.4f}')
+print(f'F1 Score: {f1:.4f}')
